@@ -88,12 +88,35 @@ class SpectralPCA(Masks):
         self.corrected_wl = self.wavelength / (1 + self.redshift)
 
         self.mask_signal(self.input_signal)
+        self.processed_signal = self.clip_using_iqr(self.masked_source, 3)
+
+    def clip_using_iqr(self, data, iqr_multiplier):
+        # Inicializando o array de saída com o mesmo shape e tipo de dados de entrada
+        clipped_data = np.zeros_like(data)
+
+        # Iterar sobre cada linha do array
+        for i in range(data.shape[0]):
+            # Calcular o primeiro e terceiro quartis
+            q1 = np.nanpercentile(data[i], 25)
+            q3 = np.nanpercentile(data[i], 75)
+
+            # Calcular o IQR
+            iqr = q3 - q1
+
+            # Definir os limites para clipping
+            lower_bound = q1 - iqr_multiplier * iqr
+            upper_bound = q3 + iqr_multiplier * iqr
+
+            # Aplicar clipping
+            clipped_data[i] = np.clip(data[i], lower_bound, upper_bound)
+
+        return clipped_data
 
     def pca_decompose(self, n_components=20):
         # Realiza a decomposição PCA no espectro 'limpo', mantendo um número definido de componentes principais
         self.pca = PCA(n_components=n_components)
         self.pca = PCA(n_components=n_components)
-        transposed_signal = self.masked_source.copy().T
+        transposed_signal = self.processed_signal.copy().T
         transposed_signal[np.isnan(transposed_signal)] = 0.0
         self.eigen_spectra = self.pca.fit_transform(transposed_signal).T
         self.tomograms = getattr(self.pca, "components_") + getattr(self.pca, "mean_")
@@ -103,7 +126,7 @@ class SpectralPCA(Masks):
         fig, ax = plt.subplots(
             nrows=3, ncols=1, figsize=(25, 8), constrained_layout=True
         )
-        ax[0].plot(np.nansum(self.masked_source, axis=1))
+        ax[0].plot(np.nansum(self.processed_signal, axis=1))
         ax[0].set_title("Perfil de luminosidade do sinal")
         ax[1].plot(self.tomograms[component])
         ax[1].set_title(f"Tomograma da componente {component}")
@@ -114,7 +137,7 @@ class SpectralPCA(Masks):
 
     def luminosity_component_correlation(self, selection_criteria):
         # Analisa a correlação entre a luminosidade e os componentes do PCA
-        Y = pd.DataFrame(np.nansum(self.masked_source, axis=1))
+        Y = pd.DataFrame(np.nansum(self.processed_signal, axis=1))
         X = pd.DataFrame(self.tomograms.T)
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
@@ -159,22 +182,26 @@ class SpectralPCA(Masks):
 
         self.noise_subtracted_source = subtracted_source
 
-    def zero_bad_components_and_reconstruct(self, bad_components=None):
-        print(f"Zeroing components: {bad_components}")
+    # def zero_bad_components_and_reconstruct(self, bad_components=None):
+    #     print(f"Zeroing components: {bad_components}")
 
-        # Criar uma cópia dos autoespectros e zerar os componentes ruins
-        good_eigen_spectra = copy.deepcopy(self.eigen_spectra)
-        for i in range(len(good_eigen_spectra)):
-            if i in bad_components:
-                good_eigen_spectra[i] = np.zeros_like(good_eigen_spectra[i])
+    #     # Criar uma cópia dos autoespectros e zerar os componentes ruins
+    #     good_eigen_spectra = copy.deepcopy(self.eigen_spectra)
+    #     for i in range(len(good_eigen_spectra)):
+    #         if i in bad_components:
+    #             good_eigen_spectra[i] = np.zeros_like(good_eigen_spectra[i])
 
-        # Reconstruir o sinal usando apenas os componentes bons
-        reconstructed_signal = np.dot(self.tomograms.T, good_eigen_spectra)
-        self.reconstructed_source = reconstructed_signal
+    #     # Reconstruir o sinal usando apenas os componentes bons
+    #     reconstructed_signal = np.dot(self.tomograms.T, good_eigen_spectra)
+    #     self.reconstructed_source = reconstructed_signal
 
-    def StepSignalRemoval(self, component):
+    def StepSignalRemoval(self, component, noise_subtracted=True):
         return StepSignalRemoval(
-            input_signal=self.noise_subtracted_source,
+            input_signal=(
+                self.noise_subtracted_source
+                if noise_subtracted
+                else self.processed_signal
+            ),
             component=component,
             eigen_spectra=self.eigen_spectra,
             tomograms=self.tomograms,
@@ -314,6 +341,7 @@ class StepSignalRemoval(Masks):
         step_signal = self.calculate_step_eigensignal(fft_filter, wavelet_filter)
         step_corrected_spectrum = self.subtract_step_signal(step_signal)
         self.clean_source = step_corrected_spectrum
+        self.mask_signal(self.clean_source)
 
     def get_sp_weights(self, beam):
         signal = np.copy(self.masked_source[beam])
@@ -346,8 +374,6 @@ class StepSignalRemoval(Masks):
         print(f"Trying params: {params}")
         fft_filter, wavelet_filter = params
         self.calculate_and_subtract_step_signal(fft_filter, wavelet_filter)
-
-        self.mask_signal(self.clean_source)
 
         residuals = []
         for beam in np.arange(len(self.clean_source)):
