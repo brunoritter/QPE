@@ -104,9 +104,12 @@ class SpectralPCA(Masks):
             nrows=3, ncols=1, figsize=(25, 8), constrained_layout=True
         )
         ax[0].plot(np.nansum(self.masked_source, axis=1))
+        ax[0].set_title("Perfil de luminosidade do sinal")
         ax[1].plot(self.tomograms[component])
+        ax[1].set_title(f"Tomograma da componente {component}")
         ax[1].axhline(0, ls="dashed", color="black")
         ax[2].plot(self.corrected_wl, self.eigen_spectra[component])
+        ax[2].set_title(f"Autoespectro (autovetor) {component}")
         ax[2].axhline(0, ls="dashed", color="black")
 
     def luminosity_component_correlation(self, selection_criteria):
@@ -122,30 +125,52 @@ class SpectralPCA(Masks):
         model_summary.drop("const", inplace=True)
         model_summary["t"] = np.abs(model_summary["t"])
         model_summary["Coef."] = np.abs(model_summary["Coef."])
-        model_summary["selection_index"] = model_summary["t"] * model_summary["Coef."]
 
         self.ordered_features = model_summary[selection_criteria].sort_values(
             ascending=False
         )
         print(self.ordered_features)
 
-    def subtract_bad_components(self, selection_threshold):
-        # Remove os componentes do PCA considerados 'ruins' com base em um limiar de seleção
-        components_to_remove = self.ordered_features[
-            self.ordered_features < selection_threshold
-        ].index
-        components_to_remove = [int(x.strip("x")) - 1 for x in components_to_remove]
+    def subtract_bad_components(self, selection_threshold=None, bad_components=None):
+        if bad_components is not None:
+            # Se uma lista de componentes ruins foi fornecida diretamente
+            components_to_remove = [int(x) for x in bad_components]
+        elif selection_threshold is not None:
+            # Remove os componentes do PCA considerados 'ruins' com base em um limiar de seleção
+            components_to_remove = self.ordered_features[
+                self.ordered_features < selection_threshold
+            ].index
+            components_to_remove = [int(x.strip("x")) - 1 for x in components_to_remove]
+        else:
+            raise ValueError(
+                "Either selection_threshold or bad_components must be provided."
+            )
+
         print(f"Removing components: {components_to_remove}")
 
+        # Realiza a subtração dos componentes ruins
         bad_eigen_spectra = copy.deepcopy(self.eigen_spectra)
         for i in range(len(bad_eigen_spectra)):
             if i not in components_to_remove:
                 bad_eigen_spectra[i] = 0
         bad_signal = np.dot(self.tomograms.T, bad_eigen_spectra)
         subtracted_source = copy.deepcopy(self.masked_source)
-        subtracted_source = subtracted_source - bad_signal
+        subtracted_source -= bad_signal
 
         self.noise_subtracted_source = subtracted_source
+
+    def zero_bad_components_and_reconstruct(self, bad_components=None):
+        print(f"Zeroing components: {bad_components}")
+
+        # Criar uma cópia dos autoespectros e zerar os componentes ruins
+        good_eigen_spectra = copy.deepcopy(self.eigen_spectra)
+        for i in range(len(good_eigen_spectra)):
+            if i in bad_components:
+                good_eigen_spectra[i] = np.zeros_like(good_eigen_spectra[i])
+
+        # Reconstruir o sinal usando apenas os componentes bons
+        reconstructed_signal = np.dot(self.tomograms.T, good_eigen_spectra)
+        self.reconstructed_source = reconstructed_signal
 
     def StepSignalRemoval(self, component):
         return StepSignalRemoval(
