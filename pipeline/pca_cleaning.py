@@ -177,7 +177,7 @@ class SpectralPCA(Masks):
             if i not in components_to_remove:
                 bad_eigen_spectra[i] = 0
         bad_signal = np.dot(self.tomograms.T, bad_eigen_spectra)
-        subtracted_source = copy.deepcopy(self.masked_source)
+        subtracted_source = copy.deepcopy(self.input_signal)
         subtracted_source -= bad_signal
 
         self.noise_subtracted_source = subtracted_source
