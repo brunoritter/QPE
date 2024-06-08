@@ -88,7 +88,7 @@ class SpectralPCA(Masks):
         self.corrected_wl = self.wavelength / (1 + self.redshift)
 
         self.mask_signal(self.input_signal)
-        self.processed_signal = self.clip_using_iqr(self.masked_source, 3)
+        self.processed_signal = self.clip_using_iqr(self.masked_source, 6)
 
     def clip_using_iqr(self, data, iqr_multiplier):
         # Inicializando o array de saída com o mesmo shape e tipo de dados de entrada
@@ -314,13 +314,13 @@ class StepSignalRemoval(Masks):
         return fft_wavelet_filtered_truncated
 
     # Apply step filtering
-    def calculate_step_eigensignal(self, fft_filter, wavelet_filter):
+    def calculate_step_eigensignal(self, fft_filter, wavelet_filter, plot=False):
         og_component = np.copy(self.eigen_spectra[self.component])
         og_mean = np.mean(og_component)
         og_std = np.std(og_component)
         normalized_component = (og_component - og_mean) / og_std
         normalized_step_signal = self._step_fit(
-            normalized_component, fft_filter, wavelet_filter
+            normalized_component, fft_filter, wavelet_filter, plot
         )
         step_eigensignal = (normalized_step_signal * og_std) + og_mean
         return step_eigensignal
@@ -337,8 +337,10 @@ class StepSignalRemoval(Masks):
         step_corrected_spectrum = step_corrected_spectrum - self.bad_signal
         return step_corrected_spectrum
 
-    def calculate_and_subtract_step_signal(self, fft_filter, wavelet_filter):
-        step_signal = self.calculate_step_eigensignal(fft_filter, wavelet_filter)
+    def calculate_and_subtract_step_signal(
+        self, fft_filter, wavelet_filter, plot=False
+    ):
+        step_signal = self.calculate_step_eigensignal(fft_filter, wavelet_filter, plot)
         step_corrected_spectrum = self.subtract_step_signal(step_signal)
         self.clean_source = step_corrected_spectrum
         self.mask_signal(self.clean_source)
